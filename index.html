@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Basket Un-random</title>
+<title>Sports Un-random</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -23,7 +23,7 @@ canvas {
 <canvas id="c"></canvas>
 <script>
 // ============================================================
-// BASKET UN-RANDOM - Pixel Art Basketball Game
+// SPORTS UN-RANDOM - Pixel Art Sports Game
 // ============================================================
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -159,13 +159,45 @@ const HOOP_SHAPES = [
   { name: 'Tall', rimW: 50, rimH: 6, backH: 80, backW: 10 }
 ];
 
+const GOAL_SHAPES = [
+  { name: 'Standard', goalW: 12, goalH: 100 },
+  { name: 'Wide', goalW: 12, goalH: 130 },
+  { name: 'Narrow', goalW: 12, goalH: 75 },
+  { name: 'Tall', goalW: 14, goalH: 150 }
+];
+
+const SOCCER_BALL_TYPES = [
+  { name: 'Normal', radius: 12, mass: 1, bounce: 0.7, color: '#ecf0f1', stripe: '#bdc3c7', points: 1 },
+  { name: 'Heavy', radius: 14, mass: 1.8, bounce: 0.45, color: '#7f8c8d', stripe: '#5d6d7e', points: 1 },
+  { name: 'Light', radius: 10, mass: 0.5, bounce: 0.8, color: '#f9e79f', stripe: '#f7dc6f', points: 1 },
+  { name: 'RAINBOW', radius: 13, mass: 1, bounce: 0.75, color: 'rainbow', stripe: '', points: 2 }
+];
+
+const VOLLEY_BALL_TYPES = [
+  { name: 'Normal', radius: 13, mass: 0.7, bounce: 0.72, color: '#f5f5dc', stripe: '#d4af37', points: 1 },
+  { name: 'Heavy', radius: 14, mass: 1.3, bounce: 0.5, color: '#7f8c8d', stripe: '#5d6d7e', points: 1 },
+  { name: 'Light', radius: 11, mass: 0.4, bounce: 0.82, color: '#fff8dc', stripe: '#f0e68c', points: 1 },
+  { name: 'RAINBOW', radius: 13, mass: 0.7, bounce: 0.75, color: 'rainbow', stripe: '', points: 2 }
+];
+
+const NET_SHAPES = [
+  { name: 'Standard', netH: 160, netW: 6 },
+  { name: 'Tall', netH: 200, netW: 6 },
+  { name: 'Short', netH: 120, netW: 6 },
+  { name: 'Wide', netH: 160, netW: 10 }
+];
+
 // ============================================================
 // GAME STATE
 // ============================================================
 let gameState = 'menu'; // 'menu', 'playing', 'scored', 'gameover'
 let gameMode = 0; // 0 = not selected, 1 = vs CPU, 2 = vs Player
+let sportMode = 'basketball'; // 'basketball', 'soccer', or 'volleyball'
+let menuScreen = 'sport'; // 'sport' or 'mode'
+let sportSelection = 0;
+let netShape = null;
 let scores = [0, 0];
-let court, bodyType1, bodyType2, ballType, hoopShape;
+let court, bodyType1, bodyType2, ballType, hoopShape, goalShape, volleyNet;
 let players = []; // 4 players: [0,1] = team1, [2,3] = team2
 let ball = null;
 let particles = [];
@@ -296,6 +328,9 @@ function createPlayer(x, team, idx, bt) {
     bobPhase: rand(0, Math.PI * 2),
     walkCycle: 0,        // walk animation phase
     stillTimer: 0,       // frames standing still with ball
+    _kickCooldown: 0,    // soccer kick cooldown
+    _kickAnim: 0,        // kick animation timer (counts down from 12)
+    _kickDir: 1,         // direction of kick
     colors: team === 0 
       ? { jersey: '#e74c3c', shorts: '#c0392b', skin: '#f5cba7', hair: '#5d4e37' }
       : { jersey: '#3498db', shorts: '#2980b9', skin: '#f5cba7', hair: '#2c3e50' }
@@ -366,8 +401,8 @@ function updatePlayer(p, input, dt) {
     SFX.jump();
   }
   
-  // Hold ball logic
-  if (p.hasBall && ball) {
+  // Hold ball logic (basketball only)
+  if (sportMode === 'basketball' && p.hasBall && ball) {
     p.holdTimer++;
     const handPos = getHandPos(p);
     ball.x = handPos.x;
@@ -392,6 +427,65 @@ function updatePlayer(p, input, dt) {
       p.isCharging = false;
       p.shootCharge = 0;
     }
+  } else if (sportMode === 'soccer') {
+    // Soccer kick: no holding, kick button applies force to nearby ball
+    p.hasBall = false;
+    p.isCharging = false;
+    p.shootCharge = 0;
+    p.stillTimer = 0;
+    if (ball && !ball.holder && input.shoot && p._kickCooldown <= 0) {
+      // Check if ball is near player's feet
+      const footY = p.y;
+      const footX = p.x + p.faceDir * 12;
+      const dFoot = dist(ball.x, ball.y, footX, footY);
+      if (dFoot < ball.radius + 28) {
+        // Kick toward opponent's goal
+        const targetGoal = p.team === 0 ? hoops[1] : hoops[0];
+        const dir = targetGoal.x > p.x ? 1 : -1;
+        const kickPower = 16 + Math.abs(p.vx) * 2;
+        const kickAngle = -20 * Math.PI / 180;
+        ball.vx = Math.cos(kickAngle) * kickPower * dir;
+        ball.vy = Math.sin(kickAngle) * kickPower;
+        ball.grabCooldown = 10;
+        ball.trail = [];
+        p._kickCooldown = 15;
+        p._kickAnim = 12;
+        p._kickDir = dir;
+        spawnParticles(footX, footY, 6, '#27ae60', 3);
+        SFX.shoot();
+      }
+    }
+    if (p._kickCooldown > 0) p._kickCooldown--;
+    if (p._kickAnim > 0) p._kickAnim--;
+  } else if (sportMode === 'volleyball') {
+    // Volleyball: no holding ball, hit it with hands when pressing shoot
+    p.hasBall = false;
+    p.isCharging = false;
+    p.shootCharge = 0;
+    p.stillTimer = 0;
+    if (ball && !ball.holder && input.shoot && p._kickCooldown <= 0) {
+      // Check if ball is near player's hands
+      const handPos = getHandPos(p);
+      const dHand = dist(ball.x, ball.y, handPos.x, handPos.y);
+      if (dHand < ball.radius + 24) {
+        // Hit ball upward and toward opponent
+        const dir = p.team === 0 ? 1 : -1;
+        const hitPower = 10 + Math.abs(p.vx) * 1.5;
+        // Angle: upward, slightly toward opponent's court
+        const hitAngle = -55 * Math.PI / 180;
+        ball.vx = Math.cos(hitAngle) * hitPower * dir * 0.7 + p.vx * 0.5;
+        ball.vy = Math.sin(hitAngle) * hitPower;
+        ball.grabCooldown = 8;
+        ball.trail = [];
+        p._kickCooldown = 12;
+        p._kickAnim = 10;
+        p._kickDir = dir;
+        spawnParticles(handPos.x, handPos.y, 6, '#f5f5dc', 3);
+        SFX.shoot();
+      }
+    }
+    if (p._kickCooldown > 0) p._kickCooldown--;
+    if (p._kickAnim > 0) p._kickAnim--;
   } else {
     p.isCharging = false;
     p.shootCharge = 0;
@@ -419,6 +513,19 @@ function updatePlayer(p, input, dt) {
   if (p.x < 30) { p.x = 30; p.vx = Math.abs(p.vx) * 0.5; }
   if (p.x > W - 30) { p.x = W - 30; p.vx = -Math.abs(p.vx) * 0.5; }
   
+  // Volleyball: restrict to own side of net
+  if (sportMode === 'volleyball' && volleyNet) {
+    const netX = volleyNet.x;
+    if (p.team === 0 && p.x > netX - 20) {
+      p.x = netX - 20;
+      p.vx = -Math.abs(p.vx) * 0.3;
+    }
+    if (p.team === 1 && p.x < netX + 20) {
+      p.x = netX + 20;
+      p.vx = Math.abs(p.vx) * 0.3;
+    }
+  }
+  
   if (p.jumpCooldown > 0) p.jumpCooldown--;
 }
 
@@ -440,16 +547,21 @@ function releaseBall(p) {
   
   // Determine which hoop this player's team attacks
   const targetHoop = p.team === 0 ? hoops[1] : hoops[0];
-  
-  // Fixed angle: always shoot at 55 degrees upward toward hoop
   const dir = targetHoop.x > p.x ? 1 : -1;
-  const angle = -55 * Math.PI / 180; // 55 degrees above horizontal
   
-  // Power scales with charge: min 6, max 18
-  const shootPower = 6 + chargeRatio * 12;
-  
-  ball.vx = Math.cos(angle) * shootPower * dir;
-  ball.vy = Math.sin(angle) * shootPower;
+  if (sportMode === 'soccer') {
+    // Soccer: kick at 25 degrees upward, more horizontal
+    const angle = -25 * Math.PI / 180;
+    const shootPower = 7 + chargeRatio * 14;
+    ball.vx = Math.cos(angle) * shootPower * dir;
+    ball.vy = Math.sin(angle) * shootPower;
+  } else {
+    // Basketball: shoot at 55 degrees upward
+    const angle = -55 * Math.PI / 180;
+    const shootPower = 6 + chargeRatio * 12;
+    ball.vx = Math.cos(angle) * shootPower * dir;
+    ball.vy = Math.sin(angle) * shootPower;
+  }
   ball.holder = null;
   ball.grabCooldown = 15;
   
@@ -484,7 +596,38 @@ function drawPlayer(p) {
   ctx.lineWidth = 5;
   ctx.lineCap = 'round';
   
-  if (isMoving) {
+  if (p._kickAnim > 0 && (sportMode === 'soccer' || sportMode === 'volleyball')) {
+    // Kick animation: one leg sweeps forward while other stays planted
+    const kickProgress = 1 - (p._kickAnim / 12); // 0 to 1
+    const kDir = p._kickDir;
+    // Swing angle: winds back (negative) then sweeps forward (positive)
+    const swingAngle = kickProgress < 0.3 
+      ? -0.8 * (1 - kickProgress / 0.3) // wind-up
+      : 1.2 * Math.sin((kickProgress - 0.3) / 0.7 * Math.PI); // forward swing
+    
+    // Kicking leg
+    const kickFootX = baseX + kDir * (10 + swingAngle * 22) + leanOff * 0.3;
+    const kickFootY = baseY - Math.abs(swingAngle) * 18 - 2;
+    const kickKneeX = baseX + kDir * (5 + swingAngle * 10) + leanOff * 0.3;
+    const kickKneeY = hipY + bt.legLen * 0.35 - Math.abs(swingAngle) * 6;
+    
+    ctx.beginPath();
+    ctx.moveTo(baseX + kDir * 3 + leanOff * 0.5, hipY - bodyBob);
+    ctx.quadraticCurveTo(kickKneeX, kickKneeY, kickFootX, kickFootY);
+    ctx.stroke();
+    
+    // Shoe for kicking foot
+    drawPixelRect(kickFootX - 4, kickFootY - 2, 8, 5, p.colors.jersey);
+    
+    // Planted leg (stays still)
+    const plantSpread = -kDir * 5;
+    ctx.beginPath();
+    ctx.moveTo(baseX + plantSpread * 0.5 + leanOff * 0.5, hipY - bodyBob);
+    ctx.quadraticCurveTo(baseX + plantSpread + leanOff * 0.3, hipY + bt.legLen * 0.5, baseX + plantSpread * 1.5 + leanOff * 0.3, baseY);
+    ctx.stroke();
+    
+    drawPixelRect(baseX + plantSpread * 1.5 - 4 + leanOff * 0.3, baseY - 3, 8, 5, p.colors.jersey);
+  } else if (isMoving) {
     // Walking animation - legs alternate like real walking
     const stride = Math.min(speed * 2.5, 14);
     const liftHeight = Math.min(speed * 1.5, 8);
@@ -678,8 +821,11 @@ function drawPlayer(p) {
 // ============================================================
 function createBall() {
   const bt = ballType || BALL_TYPES[0];
+  // Volleyball: start ball on a random side, higher up for a serve feel
+  const startX = sportMode === 'volleyball' ? (Math.random() < 0.5 ? W * 0.25 : W * 0.75) : W / 2;
+  const startY = sportMode === 'volleyball' ? 60 : 100;
   return {
-    x: W / 2, y: 100,
+    x: startX, y: startY,
     vx: rand(-2, 2), vy: 0,
     radius: bt.radius,
     mass: bt.mass,
@@ -717,25 +863,54 @@ function updateBall() {
   
   // Ground bounce
   if (ball.y + ball.radius > GROUND_Y) {
-    ball.y = GROUND_Y - ball.radius;
-    ball.vy = -Math.abs(ball.vy) * ball.bounce;
-    ball.vx *= 0.9;
-    if (Math.abs(ball.vy) > 2) {
-      spawnParticles(ball.x, GROUND_Y, 3, '#aaa', 1.5);
+    if (sportMode === 'volleyball') {
+      // In volleyball, ball touching ground = score, just stop it
+      ball.y = GROUND_Y - ball.radius;
+      ball.vy = 0;
+      ball.vx *= 0.3;
+      spawnParticles(ball.x, GROUND_Y, 6, '#f5f5dc', 2);
       SFX.bounce();
+    } else {
+      ball.y = GROUND_Y - ball.radius;
+      ball.vy = -Math.abs(ball.vy) * ball.bounce;
+      ball.vx *= 0.9;
+      if (Math.abs(ball.vy) > 2) {
+        spawnParticles(ball.x, GROUND_Y, 3, '#aaa', 1.5);
+        SFX.bounce();
+      }
     }
   }
   
   // Wall bounce
-  if (ball.x - ball.radius < 5) {
-    ball.x = 5 + ball.radius;
-    ball.vx = Math.abs(ball.vx) * ball.bounce;
-    SFX.wallBounce();
-  }
-  if (ball.x + ball.radius > W - 5) {
-    ball.x = W - 5 - ball.radius;
-    ball.vx = -Math.abs(ball.vx) * ball.bounce;
-    SFX.wallBounce();
+  if (sportMode === 'soccer') {
+    // Soccer: walls only bounce above the goal opening
+    const gs = goalShape || GOAL_SHAPES[0];
+    const goalTop = GROUND_Y - gs.goalH;
+    if (ball.x - ball.radius < 5) {
+      if (ball.y < goalTop || ball.y + ball.radius > GROUND_Y) {
+        ball.x = 5 + ball.radius;
+        ball.vx = Math.abs(ball.vx) * ball.bounce;
+        SFX.wallBounce();
+      }
+    }
+    if (ball.x + ball.radius > W - 5) {
+      if (ball.y < goalTop || ball.y + ball.radius > GROUND_Y) {
+        ball.x = W - 5 - ball.radius;
+        ball.vx = -Math.abs(ball.vx) * ball.bounce;
+        SFX.wallBounce();
+      }
+    }
+  } else {
+    if (ball.x - ball.radius < 5) {
+      ball.x = 5 + ball.radius;
+      ball.vx = Math.abs(ball.vx) * ball.bounce;
+      SFX.wallBounce();
+    }
+    if (ball.x + ball.radius > W - 5) {
+      ball.x = W - 5 - ball.radius;
+      ball.vx = -Math.abs(ball.vx) * ball.bounce;
+      SFX.wallBounce();
+    }
   }
   
   // Ceiling
@@ -747,8 +922,8 @@ function updateBall() {
   // Air resistance
   ball.vx *= 0.998;
   
-  // Check ball-player hand collision - very sensitive grab
-  if (ball.grabCooldown <= 0) {
+  // Check ball-player hand collision - very sensitive grab (basketball only)
+  if (ball.grabCooldown <= 0 && sportMode === 'basketball') {
     for (const p of players) {
       if (p.hasBall) continue;
       const handPos = getHandPos(p);
@@ -849,16 +1024,39 @@ function drawBall() {
   drawPixelCircle(0, 0, ball.radius, mainColor);
   
   if (ball.color !== 'rainbow') {
-    // Stripes
-    ctx.strokeStyle = ball.stripe;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-ball.radius, 0);
-    ctx.lineTo(ball.radius, 0);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(0, 0, ball.radius * 0.7, -0.5, 0.5);
-    ctx.stroke();
+    if (sportMode === 'volleyball') {
+      // Volleyball pattern - curved stripes
+      ctx.strokeStyle = ball.stripe || '#d4af37';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, ball.radius * 0.85, 0.3, 2.8);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, ball.radius * 0.85, 3.4, 5.9);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, ball.radius * 0.4, 1.2, 4.8);
+      ctx.stroke();
+    } else if (sportMode === 'soccer') {
+      // Soccer ball pattern - pentagons
+      ctx.fillStyle = ball.stripe || '#333';
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        drawPixelCircle(Math.cos(a) * ball.radius * 0.55, Math.sin(a) * ball.radius * 0.55, ball.radius * 0.22, ball.stripe || '#333');
+      }
+      drawPixelCircle(0, 0, ball.radius * 0.25, ball.stripe || '#333');
+    } else {
+      // Basketball stripes
+      ctx.strokeStyle = ball.stripe;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-ball.radius, 0);
+      ctx.lineTo(ball.radius, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, ball.radius * 0.7, -0.5, 0.5);
+      ctx.stroke();
+    }
   } else {
     // Rainbow sparkle
     for (let i = 0; i < 4; i++) {
@@ -879,59 +1077,161 @@ function drawBall() {
 let hoops = [];
 
 function createHoops() {
-  const hs = hoopShape || HOOP_SHAPES[0];
-  hoops = [
-    { x: 65, y: GROUND_Y - 160, team: 1, ...hs },   // Left hoop (team 1 scores here = team 0's basket to attack)
-    { x: W - 65, y: GROUND_Y - 160, team: 0, ...hs } // Right hoop
-  ];
+  if (sportMode === 'volleyball') {
+    const ns = netShape || NET_SHAPES[0];
+    volleyNet = { x: W / 2, y: GROUND_Y - ns.netH, netH: ns.netH, netW: ns.netW };
+    hoops = []; // No hoops in volleyball
+  } else if (sportMode === 'soccer') {
+    const gs = goalShape || GOAL_SHAPES[0];
+    hoops = [
+      { x: 5, y: GROUND_Y - gs.goalH, team: 1, goalW: gs.goalW, goalH: gs.goalH, isSoccer: true },
+      { x: W - 5 - gs.goalW, y: GROUND_Y - gs.goalH, team: 0, goalW: gs.goalW, goalH: gs.goalH, isSoccer: true }
+    ];
+  } else {
+    const hs = hoopShape || HOOP_SHAPES[0];
+    hoops = [
+      { x: 65, y: GROUND_Y - 160, team: 1, ...hs },
+      { x: W - 65, y: GROUND_Y - 160, team: 0, ...hs }
+    ];
+  }
 }
 
 function checkHoopScore() {
   if (!ball || ball.holder !== null) return -1;
   
-  for (const hoop of hoops) {
-    const rimLeftX = hoop.x - hoop.rimW / 2;
-    const rimRightX = hoop.x + hoop.rimW / 2;
-    const rimY = hoop.y;
-    
-    // Ball must be going downward and pass through the rim
-    if (ball.vy > 0 && 
-        ball.x > rimLeftX + 5 && ball.x < rimRightX - 5 &&
-        ball.y > rimY - 5 && ball.y < rimY + 15 &&
-        ball.y - ball.vy <= rimY + 5) {
-      return hoop.team;
-    }
-    
-    // Rim collision (left rim)
-    const dL = dist(ball.x, ball.y, rimLeftX, rimY);
-    if (dL < ball.radius + 3) {
-      const angle = Math.atan2(ball.y - rimY, ball.x - rimLeftX);
-      ball.vx += Math.cos(angle) * 2;
-      ball.vy += Math.sin(angle) * 2;
-      SFX.rimHit();
-    }
-    
-    // Rim collision (right rim)
-    const dR = dist(ball.x, ball.y, rimRightX, rimY);
-    if (dR < ball.radius + 3) {
-      const angle = Math.atan2(ball.y - rimY, ball.x - rimRightX);
-      ball.vx += Math.cos(angle) * 2;
-      ball.vy += Math.sin(angle) * 2;
-    }
-    
-    // Backboard collision
-    const isLeftHoop = hoop.x < W / 2;
-    const backX = isLeftHoop ? hoop.x - hoop.rimW / 2 - hoop.backW : hoop.x + hoop.rimW / 2;
-    const backTop = hoop.y - hoop.backH;
-    
-    if (ball.x + ball.radius > backX && ball.x - ball.radius < backX + hoop.backW &&
-        ball.y > backTop && ball.y < hoop.y + 10) {
-      if (isLeftHoop) {
-        ball.vx = Math.abs(ball.vx) * ball.bounce;
-        ball.x = backX + hoop.backW + ball.radius;
+  // Volleyball: score when ball hits the ground
+  if (sportMode === 'volleyball') {
+    // Ball is on the ground (updateBall sets y = GROUND_Y - radius and vy = 0)
+    if (ball.y + ball.radius >= GROUND_Y - 1 && ball.y >= GROUND_Y - ball.radius - 1) {
+      // Ball hit the ground - who scores?
+      if (ball.x < W / 2) {
+        // Ball landed on team 0's side → team 1 scores
+        return 1;
       } else {
-        ball.vx = -Math.abs(ball.vx) * ball.bounce;
-        ball.x = backX - ball.radius;
+        // Ball landed on team 1's side → team 0 scores
+        return 0;
+      }
+    }
+    
+    // Net collision
+    if (volleyNet) {
+      const netLeft = volleyNet.x - volleyNet.netW / 2;
+      const netRight = volleyNet.x + volleyNet.netW / 2;
+      const netTop = volleyNet.y;
+      
+      // Ball hits net from either side
+      if (ball.x + ball.radius > netLeft && ball.x - ball.radius < netRight &&
+          ball.y + ball.radius > netTop && ball.y - ball.radius < GROUND_Y) {
+        // Bounce ball back
+        if (ball.vx > 0) {
+          ball.x = netLeft - ball.radius;
+          ball.vx = -Math.abs(ball.vx) * ball.bounce;
+        } else {
+          ball.x = netRight + ball.radius;
+          ball.vx = Math.abs(ball.vx) * ball.bounce;
+        }
+        SFX.rimHit();
+      }
+      
+      // Ball hits top of net
+      if (ball.x + ball.radius > netLeft - 5 && ball.x - ball.radius < netRight + 5 &&
+          ball.y + ball.radius > netTop - 3 && ball.y + ball.radius < netTop + 8 &&
+          ball.vy > 0) {
+        ball.vy = -Math.abs(ball.vy) * ball.bounce * 0.7;
+        ball.y = netTop - 3 - ball.radius;
+        SFX.rimHit();
+      }
+    }
+    
+    return -1;
+  }
+  
+  for (const hoop of hoops) {
+    if (hoop.isSoccer) {
+      // Soccer goal check: ball enters the goal area
+      const isLeft = hoop.x < W / 2;
+      const goalX = isLeft ? hoop.x : hoop.x;
+      const goalTop = hoop.y;
+      const goalBottom = GROUND_Y;
+      
+      // Ball crosses into goal
+      if (ball.y + ball.radius > goalTop + 5 && ball.y - ball.radius < goalBottom) {
+        if (isLeft && ball.x - ball.radius < goalX + hoop.goalW && ball.vx < 0) {
+          return hoop.team;
+        }
+        if (!isLeft && ball.x + ball.radius > goalX && ball.vx > 0) {
+          return hoop.team;
+        }
+      }
+      
+      // Crossbar collision (top of goal)
+      if (ball.y + ball.radius > goalTop - 3 && ball.y - ball.radius < goalTop + 5) {
+        if (isLeft && ball.x < goalX + hoop.goalW + 30 && ball.x > goalX - 5) {
+          ball.vy = Math.abs(ball.vy) * ball.bounce;
+          ball.y = goalTop + 5 + ball.radius;
+          SFX.rimHit();
+        }
+        if (!isLeft && ball.x > goalX - 30 && ball.x < goalX + hoop.goalW + 5) {
+          ball.vy = Math.abs(ball.vy) * ball.bounce;
+          ball.y = goalTop + 5 + ball.radius;
+          SFX.rimHit();
+        }
+      }
+      
+      // Post collision (front post)
+      const postX = isLeft ? goalX + hoop.goalW : goalX;
+      const dPost = dist(ball.x, ball.y, postX, clamp(ball.y, goalTop, goalBottom));
+      if (dPost < ball.radius + 3) {
+        if (isLeft) {
+          ball.vx = Math.abs(ball.vx) * ball.bounce;
+          ball.x = postX + ball.radius + 3;
+        } else {
+          ball.vx = -Math.abs(ball.vx) * ball.bounce;
+          ball.x = postX - ball.radius - 3;
+        }
+        SFX.rimHit();
+      }
+    } else {
+      // Basketball hoop check
+      const rimLeftX = hoop.x - hoop.rimW / 2;
+      const rimRightX = hoop.x + hoop.rimW / 2;
+      const rimY = hoop.y;
+      
+      if (ball.vy > 0 && 
+          ball.x > rimLeftX + 5 && ball.x < rimRightX - 5 &&
+          ball.y > rimY - 5 && ball.y < rimY + 15 &&
+          ball.y - ball.vy <= rimY + 5) {
+        return hoop.team;
+      }
+      
+      const dL = dist(ball.x, ball.y, rimLeftX, rimY);
+      if (dL < ball.radius + 3) {
+        const angle = Math.atan2(ball.y - rimY, ball.x - rimLeftX);
+        ball.vx += Math.cos(angle) * 2;
+        ball.vy += Math.sin(angle) * 2;
+        SFX.rimHit();
+      }
+      
+      const dR = dist(ball.x, ball.y, rimRightX, rimY);
+      if (dR < ball.radius + 3) {
+        const angle = Math.atan2(ball.y - rimY, ball.x - rimRightX);
+        ball.vx += Math.cos(angle) * 2;
+        ball.vy += Math.sin(angle) * 2;
+      }
+      
+      const isLeftHoop = hoop.x < W / 2;
+      const backX = isLeftHoop ? hoop.x - hoop.rimW / 2 - hoop.backW : hoop.x + hoop.rimW / 2;
+      const backTop = hoop.y - hoop.backH;
+      
+      if (ball.x + ball.radius > backX && ball.x - ball.radius < backX + hoop.backW &&
+          ball.y > backTop && ball.y < hoop.y + 10) {
+        if (isLeftHoop) {
+          ball.vx = Math.abs(ball.vx) * ball.bounce;
+          ball.x = backX + hoop.backW + ball.radius;
+        } else {
+          ball.vx = -Math.abs(ball.vx) * ball.bounce;
+          ball.x = backX - ball.radius;
+        }
       }
     }
   }
@@ -939,6 +1239,10 @@ function checkHoopScore() {
 }
 
 function drawHoop(hoop) {
+  if (hoop.isSoccer) {
+    drawGoal(hoop);
+    return;
+  }
   const isLeft = hoop.x < W / 2;
   const rimLeftX = hoop.x - hoop.rimW / 2;
   const rimRightX = hoop.x + hoop.rimW / 2;
@@ -977,6 +1281,119 @@ function drawHoop(hoop) {
   }
 }
 
+function drawGoal(goal) {
+  const isLeft = goal.x < W / 2;
+  const goalTop = goal.y;
+  const goalBottom = GROUND_Y;
+  const goalH = goalBottom - goalTop;
+  
+  if (isLeft) {
+    // Left goal: back wall at x=0, opening faces right
+    // Back net (behind goal)
+    drawPixelRect(0, goalTop, goal.goalW, goalH, 'rgba(255,255,255,0.15)');
+    
+    // Net mesh pattern
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    for (let ny = goalTop; ny < goalBottom; ny += 10) {
+      ctx.beginPath();
+      ctx.moveTo(0, ny);
+      ctx.lineTo(goal.goalW + 5, ny);
+      ctx.stroke();
+    }
+    for (let nx = 0; nx < goal.goalW + 5; nx += 10) {
+      ctx.beginPath();
+      ctx.moveTo(nx, goalTop);
+      ctx.lineTo(nx, goalBottom);
+      ctx.stroke();
+    }
+    
+    // Crossbar (top)
+    drawPixelRect(0, goalTop - 4, goal.goalW + 8, 6, '#fff');
+    drawPixelRect(0, goalTop - 3, goal.goalW + 8, 4, '#ddd');
+    
+    // Front post (right side)
+    drawPixelRect(goal.goalW + 2, goalTop - 4, 6, goalH + 4, '#fff');
+    drawPixelRect(goal.goalW + 3, goalTop - 3, 4, goalH + 3, '#ddd');
+    
+    // Back post (at wall)
+    drawPixelRect(0, goalTop - 4, 6, goalH + 4, '#fff');
+  } else {
+    // Right goal: back wall at W, opening faces left
+    const gx = goal.x;
+    
+    // Back net
+    drawPixelRect(gx, goalTop, goal.goalW + 5, goalH, 'rgba(255,255,255,0.15)');
+    
+    // Net mesh
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    for (let ny = goalTop; ny < goalBottom; ny += 10) {
+      ctx.beginPath();
+      ctx.moveTo(gx - 5, ny);
+      ctx.lineTo(W, ny);
+      ctx.stroke();
+    }
+    for (let nx = gx - 5; nx <= W; nx += 10) {
+      ctx.beginPath();
+      ctx.moveTo(nx, goalTop);
+      ctx.lineTo(nx, goalBottom);
+      ctx.stroke();
+    }
+    
+    // Crossbar
+    drawPixelRect(gx - 8, goalTop - 4, goal.goalW + 8, 6, '#fff');
+    drawPixelRect(gx - 8, goalTop - 3, goal.goalW + 8, 4, '#ddd');
+    
+    // Front post (left side)
+    drawPixelRect(gx - 8, goalTop - 4, 6, goalH + 4, '#fff');
+    drawPixelRect(gx - 7, goalTop - 3, 4, goalH + 3, '#ddd');
+    
+    // Back post (at wall)
+    drawPixelRect(W - 6, goalTop - 4, 6, goalH + 4, '#fff');
+  }
+}
+
+function drawVolleyNet() {
+  if (!volleyNet) return;
+  const nx = volleyNet.x;
+  const netTop = volleyNet.y;
+  const netBottom = GROUND_Y;
+  const halfW = volleyNet.netW / 2;
+  
+  // Pole
+  drawPixelRect(nx - 3, netTop - 10, 6, netBottom - netTop + 10, '#888');
+  drawPixelRect(nx - 2, netTop - 10, 4, netBottom - netTop + 10, '#aaa');
+  
+  // Pole cap
+  drawPixelCircle(nx, netTop - 10, 5, '#ccc');
+  
+  // Net mesh
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1;
+  
+  // Horizontal net lines
+  const netExtend = 35;
+  for (let ny = netTop; ny < netBottom; ny += 8) {
+    ctx.beginPath();
+    ctx.moveTo(nx - netExtend, ny);
+    ctx.lineTo(nx + netExtend, ny);
+    ctx.stroke();
+  }
+  
+  // Vertical net lines
+  for (let vx = nx - netExtend; vx <= nx + netExtend; vx += 8) {
+    ctx.beginPath();
+    ctx.moveTo(vx, netTop);
+    ctx.lineTo(vx, netBottom);
+    ctx.stroke();
+  }
+  
+  // Top rope (white band)
+  drawPixelRect(nx - netExtend - 2, netTop - 2, netExtend * 2 + 4, 4, '#fff');
+  drawPixelRect(nx - netExtend - 1, netTop - 1, netExtend * 2 + 2, 2, '#eee');
+}
+
 // ============================================================
 // PLAYER vs PLAYER COLLISION
 // ============================================================
@@ -997,7 +1414,7 @@ function playerCollisions() {
         
         // Body-contact steal: if one player touches a ball holder
         // while pressing shoot, or the holder has been still 1+ second
-        if (ball && ball.grabCooldown <= 0) {
+        if (ball && ball.grabCooldown <= 0 && sportMode === 'basketball') {
           if (b.hasBall && (a.isCharging || b.stillTimer >= 60)) {
             // a steals from b
             b.hasBall = false;
@@ -1040,15 +1457,15 @@ function updateCPU(p) {
   // CPU AI returns an input object: { left, right, jump, shoot }
   const input = { left: false, right: false, jump: false, shoot: false };
   
-  const attackHoop = hoops[0]; // Left hoop, where team 1 scores
-  const defHoop = hoops[1]; // Right hoop, defend this
+  const attackHoop = hoops[0] || null; // Left hoop, where team 1 scores
+  const defHoop = hoops[1] || null; // Right hoop, defend this
   
   if (!ball) return input;
   
   const distToBall = dist(p.x, p.y, ball.x, ball.y);
-  const distToHoop = dist(p.x, p.y, attackHoop.x, attackHoop.y);
+  const distToHoop = attackHoop ? dist(p.x, p.y, attackHoop.x, attackHoop.y) : 999;
   
-  if (p.hasBall) {
+  if (p.hasBall && sportMode === 'basketball') {
     // Has ball - move toward attack hoop
     if (p.x > attackHoop.x + 60) {
       input.left = true;
@@ -1077,14 +1494,71 @@ function updateCPU(p) {
         }
       }
     }
+  } else if (sportMode === 'soccer') {
+    // Soccer CPU: chase ball and kick it toward goal
+    if (ball.x < p.x - 10) input.left = true;
+    if (ball.x > p.x + 10) input.right = true;
+    
+    // Jump to intercept airborne ball
+    if (ball.y < GROUND_Y - 60 && distToBall < 120 && p.onGround && Math.random() < 0.12) {
+      input.jump = true;
+    }
+    
+    // Kick when near ball and ball is roughly toward attack goal
+    const footY = p.y;
+    const footX = p.x + p.faceDir * 12;
+    const dFoot = dist(ball.x, ball.y, footX, footY);
+    if (dFoot < ball.radius + 35 && Math.random() < 0.25) {
+      input.shoot = true;
+    }
+  } else if (sportMode === 'volleyball') {
+    // Volleyball CPU: position under ball on own side, hit it over
+    const netX = volleyNet ? volleyNet.x : W / 2;
+    const ownSideMin = p.team === 1 ? netX + 25 : 30;
+    const ownSideMax = p.team === 1 ? W - 30 : netX - 25;
+    
+    // Only chase ball when it's on our side or heading our way
+    const ballOnOurSide = (p.team === 0 && ball.x < netX) || (p.team === 1 && ball.x > netX);
+    const ballComingToUs = (p.team === 0 && ball.vx < 0) || (p.team === 1 && ball.vx > 0);
+    
+    if (ballOnOurSide || ballComingToUs) {
+      // Position under the ball
+      const targetX = clamp(ball.x, ownSideMin, ownSideMax);
+      if (targetX < p.x - 8) input.left = true;
+      if (targetX > p.x + 8) input.right = true;
+      
+      // Jump to intercept ball
+      if (ball.y < GROUND_Y - 40 && distToBall < 140 && p.onGround && Math.random() < 0.2) {
+        input.jump = true;
+      }
+      
+      // Hit when ball is near
+      const handPos = getHandPos(p);
+      const dHand = dist(ball.x, ball.y, handPos.x, handPos.y);
+      if (dHand < ball.radius + 30 && Math.random() < 0.35) {
+        input.shoot = true;
+      }
+    } else {
+      // Ball is on opponent's side - return to center of our side
+      const centerX = (ownSideMin + ownSideMax) / 2;
+      if (centerX < p.x - 15) input.left = true;
+      if (centerX > p.x + 15) input.right = true;
+    }
+    
+    // Jump if ball is close and high
+    if (ball.y < GROUND_Y - 80 && distToBall < 100 && p.onGround && Math.random() < 0.15) {
+      input.jump = true;
+    }
   } else {
     // Chase the ball aggressively
     const ballIsHeldByTeammate = ball.holder && ball.holder.team === p.team && ball.holder !== p;
     
     if (ballIsHeldByTeammate) {
       // Teammate has ball - position near hoop to help
-      if (p.x > attackHoop.x + 120) input.left = true;
-      if (p.x < attackHoop.x + 30) input.right = true;
+      if (attackHoop) {
+        if (p.x > attackHoop.x + 120) input.left = true;
+        if (p.x < attackHoop.x + 30) input.right = true;
+      }
     } else {
       // Chase the ball - always move toward it
       if (ball.x < p.x - 10) input.left = true;
@@ -1105,7 +1579,7 @@ function updateCPU(p) {
     }
     
     // Defensive jump if ball is near our hoop
-    if (dist(ball.x, ball.y, defHoop.x, defHoop.y) < 120 && p.onGround) {
+    if (defHoop && dist(ball.x, ball.y, defHoop.x, defHoop.y) < 120 && p.onGround) {
       input.jump = Math.random() < 0.12;
     }
   }
@@ -1243,9 +1717,16 @@ function drawCourt() {
   }
   ctx.globalAlpha = 1;
   
-  // Side walls (thin)
-  drawPixelRect(0, 0, 5, H, c.wall);
-  drawPixelRect(W - 5, 0, 5, H, c.wall);
+  // Side walls (thin) - in soccer mode, only draw above goal area
+  if (sportMode === 'soccer') {
+    const gs = goalShape || GOAL_SHAPES[0];
+    const goalTop = GROUND_Y - gs.goalH;
+    drawPixelRect(0, 0, 5, goalTop, c.wall);
+    drawPixelRect(W - 5, 0, 5, goalTop, c.wall);
+  } else {
+    drawPixelRect(0, 0, 5, H, c.wall);
+    drawPixelRect(W - 5, 0, 5, H, c.wall);
+  }
 }
 
 // ============================================================
@@ -1290,11 +1771,8 @@ function drawScoreboard() {
   }
 }
 
-function drawMenu() {
-  // Background
+function drawMenuBackground() {
   drawPixelRect(0, 0, W, H, '#1a1a2e');
-  
-  // Stars
   for (let i = 0; i < 50; i++) {
     const sx = (i * 73) % W;
     const sy = (i * 47) % H;
@@ -1303,79 +1781,183 @@ function drawMenu() {
     drawPixelRect(sx, sy, 2, 2, '#fff');
   }
   ctx.globalAlpha = 1;
-  
-  // Title
   ctx.textAlign = 'center';
+}
+
+function drawMenuButton(label, x, y, w, h, selected, hovered, baseColor, darkColor) {
+  if (selected || hovered) {
+    const pulse = Math.sin(gameTime * 0.1) * 5;
+    drawPixelRect(x - 5 + pulse, y - 3, w + 10 - pulse * 2, h + 6, baseColor);
+    drawPixelRect(x - 2 + pulse, y, w + 4 - pulse * 2, h, darkColor);
+    ctx.fillStyle = '#fff';
+  } else {
+    drawPixelRect(x, y, w, h, 'rgba(255,255,255,0.1)');
+    ctx.fillStyle = '#888';
+  }
+}
+
+function drawMenu() {
+  drawMenuBackground();
   
-  // Title shadow
-  ctx.fillStyle = '#000';
-  ctx.font = 'bold 48px monospace';
-  ctx.fillText('BASKET', W/2 + 3, 123);
-  ctx.fillText('UN-RANDOM', W/2 + 3, 173);
-  
-  // Title text
-  ctx.fillStyle = '#e74c3c';
-  ctx.font = 'bold 48px monospace';
-  ctx.fillText('BASKET', W/2, 120);
-  ctx.fillStyle = '#f39c12';
-  ctx.fillText('UN-RANDOM', W/2, 170);
-  
-  // Bouncing ball
-  const ballY = 75 + Math.abs(Math.sin(gameTime * 0.06)) * 20;
-  drawPixelCircle(W/2, ballY, 15, '#e67e22');
-  drawPixelRect(W/2 - 15, ballY - 1, 30, 2, '#d35400');
-  drawPixelCircle(W/2 - 4, ballY - 4, 3, 'rgba(255,255,255,0.4)');
-  
-  // Menu options
-  const options = ['1 PLAYER vs CPU', '2 PLAYERS LOCAL'];
-  const startY = 230;
-  
-  for (let i = 0; i < options.length; i++) {
-    const y = startY + i * 60;
-    const btnX = W/2 - 145;
-    const btnW = 290;
-    const btnH = 34;
-    const hovered = isMouseInRect(btnX, y - 2, btnW, btnH);
-    const selected = menuSelection === i;
+  if (menuScreen === 'sport') {
+    // Sport selection screen
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 44px monospace';
+    ctx.fillText('CHOOSE YOUR', W/2 + 3, 113);
+    ctx.fillText('SPORT', W/2 + 3, 163);
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = 'bold 44px monospace';
+    ctx.fillText('CHOOSE YOUR', W/2, 110);
+    ctx.fillStyle = '#f39c12';
+    ctx.fillText('SPORT', W/2, 160);
     
-    // Mouse hover selects
-    if (hovered) menuSelection = i;
+    const sportOptions = [
+      { label: '\uD83C\uDFC0  BASKETBALL', color: '#e67e22', dark: '#d35400', desc: 'Shoot hoops! Throw the ball into the basket!' },
+      { label: '\u26BD  SOCCER', color: '#27ae60', dark: '#1e8449', desc: 'Score goals! Kick the ball into the net!' },
+      { label: '\uD83C\uDFD0  VOLLEYBALL', color: '#e74c3c', dark: '#c0392b', desc: 'Spike it! Hit the ball over the net!' }
+    ];
+    const startY = 200;
     
-    if (selected || hovered) {
-      const pulse = Math.sin(gameTime * 0.1) * 5;
-      drawPixelRect(W/2 - 150 + pulse, y - 5, 300 - pulse * 2, 40, '#e74c3c');
-      drawPixelRect(W/2 - 147 + pulse, y - 2, 294 - pulse * 2, 34, '#c0392b');
+    for (let i = 0; i < sportOptions.length; i++) {
+      const opt = sportOptions[i];
+      const y = startY + i * 58;
+      const btnX = W/2 - 155;
+      const btnW = 310;
+      const btnH = 40;
+      const hovered = isMouseInRect(btnX, y, btnW, btnH);
+      if (hovered) sportSelection = i;
+      const selected = sportSelection === i;
+      
+      drawMenuButton(opt.label, btnX, y, btnW, btnH, selected, hovered, opt.color, opt.dark);
+      ctx.font = 'bold 20px monospace';
+      ctx.fillText(opt.label, W/2, y + 27);
+      
+      if (hovered && mouse.clicked) {
+        sportMode = ['basketball', 'soccer', 'volleyball'][i];
+        menuScreen = 'mode';
+        menuSelection = 0;
+        mouse.clicked = false;
+        SFX.menuConfirm();
+      }
+    }
+    
+    ctx.fillStyle = '#666';
+    ctx.font = '12px monospace';
+    ctx.fillText('\u2191/\u2193 Select  \u2022  ENTER or Click', W/2, 400);
+    
+    ctx.fillStyle = '#555';
+    ctx.font = '11px monospace';
+    ctx.fillText(sportOptions[sportSelection].desc, W/2, 440);
+    
+    ctx.fillStyle = '#444';
+    ctx.font = '10px monospace';
+    ctx.fillText('Floppy ragdoll sports chaos!', W/2, 470);
+    
+  } else {
+    // Mode selection screen
+    const titleWord1 = sportMode === 'soccer' ? 'SOCCER' : (sportMode === 'volleyball' ? 'VOLLEY' : 'BASKET');
+    const titleColor = sportMode === 'soccer' ? '#27ae60' : (sportMode === 'volleyball' ? '#e74c3c' : '#e74c3c');
+    const btnColor = sportMode === 'soccer' ? '#27ae60' : (sportMode === 'volleyball' ? '#e74c3c' : '#e74c3c');
+    const btnDark = sportMode === 'soccer' ? '#1e8449' : (sportMode === 'volleyball' ? '#c0392b' : '#c0392b');
+    
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 48px monospace';
+    ctx.fillText(titleWord1, W/2 + 3, 123);
+    ctx.fillText('UN-RANDOM', W/2 + 3, 173);
+    ctx.fillStyle = titleColor;
+    ctx.font = 'bold 48px monospace';
+    ctx.fillText(titleWord1, W/2, 120);
+    ctx.fillStyle = '#f39c12';
+    ctx.fillText('UN-RANDOM', W/2, 170);
+    
+    // Bouncing ball
+    const ballY = 75 + Math.abs(Math.sin(gameTime * 0.06)) * 20;
+    if (sportMode === 'soccer') {
+      drawPixelCircle(W/2, ballY, 15, '#ecf0f1');
+      drawPixelCircle(W/2 - 5, ballY - 5, 4, '#333');
+      drawPixelCircle(W/2 + 6, ballY - 2, 4, '#333');
+      drawPixelCircle(W/2, ballY + 6, 4, '#333');
+    } else if (sportMode === 'volleyball') {
+      drawPixelCircle(W/2, ballY, 15, '#f5f5dc');
+      ctx.strokeStyle = '#d4af37';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(W/2, ballY, 12, 0.3, 2.8);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(W/2, ballY, 12, 3.4, 5.9);
+      ctx.stroke();
+    } else {
+      drawPixelCircle(W/2, ballY, 15, '#e67e22');
+      drawPixelRect(W/2 - 15, ballY - 1, 30, 2, '#d35400');
+    }
+    drawPixelCircle(W/2 - 4, ballY - 4, 3, 'rgba(255,255,255,0.4)');
+    
+    // Mode options
+    const options = ['1 PLAYER vs CPU', '2 PLAYERS LOCAL'];
+    const startY = 230;
+    
+    for (let i = 0; i < options.length; i++) {
+      const y = startY + i * 60;
+      const btnX = W/2 - 145;
+      const btnW = 290;
+      const btnH = 34;
+      const hovered = isMouseInRect(btnX, y - 2, btnW, btnH);
+      if (hovered) menuSelection = i;
+      const selected = menuSelection === i;
+      
+      drawMenuButton(options[i], btnX, y - 2, btnW, btnH, selected, hovered, btnColor, btnDark);
+      ctx.font = 'bold 18px monospace';
+      ctx.fillText(options[i], W/2, y + 20);
+      
+      if (hovered && mouse.clicked) {
+        startGame(i === 0 ? 1 : 2);
+        mouse.clicked = false;
+      }
+    }
+    
+    // Back button
+    const backY = 360;
+    const backBtnX = W/2 - 60;
+    const backBtnW = 120;
+    const backBtnH = 28;
+    const backHovered = isMouseInRect(backBtnX, backY - 2, backBtnW, backBtnH);
+    if (backHovered) menuSelection = 2;
+    const backSelected = menuSelection === 2;
+    
+    if (backSelected || backHovered) {
+      const pulse = Math.sin(gameTime * 0.1) * 3;
+      drawPixelRect(backBtnX - 3 + pulse, backY - 4, backBtnW + 6 - pulse * 2, backBtnH + 4, '#888');
+      drawPixelRect(backBtnX - 1 + pulse, backY - 2, backBtnW + 2 - pulse * 2, backBtnH, '#555');
       ctx.fillStyle = '#fff';
     } else {
-      drawPixelRect(btnX, y - 2, btnW, btnH, 'rgba(255,255,255,0.1)');
-      ctx.fillStyle = '#888';
+      drawPixelRect(backBtnX, backY - 2, backBtnW, backBtnH, 'rgba(255,255,255,0.05)');
+      ctx.fillStyle = '#666';
     }
-    
-    ctx.font = 'bold 18px monospace';
-    ctx.fillText(options[i], W/2, y + 20);
-    
-    // Mouse click on option
-    if (hovered && mouse.clicked) {
-      startGame(i === 0 ? 1 : 2);
+    ctx.font = '14px monospace';
+    ctx.fillText('\u2190 BACK', W/2, backY + 16);
+    if (backHovered && mouse.clicked) {
+      menuScreen = 'sport';
+      sportSelection = 0;
       mouse.clicked = false;
+      SFX.menuSelect();
     }
+    
+    ctx.fillStyle = '#666';
+    ctx.font = '12px monospace';
+    ctx.fillText('\u2191/\u2193 Select  \u2022  ENTER or Click  \u2022  ESC Back', W/2, 410);
+    
+    ctx.fillStyle = '#888';
+    ctx.font = '11px monospace';
+    const shootWord = sportMode === 'soccer' ? 'Kick' : (sportMode === 'volleyball' ? 'Hit' : 'Shoot');
+    ctx.fillText('P1: WASD Move/Jump  S=' + shootWord, W/2, 435);
+    ctx.fillText('P2: Arrows Move/Jump  \u2193=' + shootWord, W/2, 455);
+    
+    ctx.fillStyle = '#444';
+    ctx.font = '10px monospace';
+    const sportLabel = sportMode === 'soccer' ? 'soccer' : (sportMode === 'volleyball' ? 'volleyball' : 'basketball');
+    ctx.fillText('First to 5 wins!  Floppy ragdoll ' + sportLabel + ' chaos!', W/2, 478);
   }
-  
-  // Controls info
-  ctx.fillStyle = '#666';
-  ctx.font = '12px monospace';
-  ctx.fillText('↑/↓ Select  •  ENTER or Click to Start', W/2, 375);
-  
-  ctx.fillStyle = '#888';
-  ctx.font = '11px monospace';
-  ctx.fillText('P1: WASD Move/Jump  S=Shoot', W/2, 400);
-  ctx.fillText('P2: Arrows Move/Jump  ↓=Shoot', W/2, 420);
-  
-  // Credits
-  ctx.fillStyle = '#444';
-  ctx.font = '10px monospace';
-  ctx.fillText('First to 5 points wins!  Grab ball on touch, S/↓ to shoot!', W/2, 455);
-  ctx.fillText('Floppy ragdoll basketball chaos!', W/2, 470);
 }
 
 function drawScoredScreen() {
@@ -1442,8 +2024,22 @@ function randomizeRound() {
   court = pick(COURTS);
   bodyType1 = pick(BODY_TYPES);
   bodyType2 = pick(BODY_TYPES);
-  ballType = pick(BALL_TYPES);
-  hoopShape = pick(HOOP_SHAPES);
+  if (sportMode === 'volleyball') {
+    ballType = pick(VOLLEY_BALL_TYPES);
+    netShape = pick(NET_SHAPES);
+    hoopShape = null;
+    goalShape = null;
+  } else if (sportMode === 'soccer') {
+    ballType = pick(SOCCER_BALL_TYPES);
+    goalShape = pick(GOAL_SHAPES);
+    hoopShape = null;
+    netShape = null;
+  } else {
+    ballType = pick(BALL_TYPES);
+    hoopShape = pick(HOOP_SHAPES);
+    goalShape = null;
+    netShape = null;
+  }
   
   // Create players - 2 per team
   players = [
@@ -1494,22 +2090,51 @@ function update() {
   gameTime++;
   
   if (gameState === 'menu') {
-    // Menu navigation
-    if (keys['ArrowUp'] || keys['KeyW']) {
-      if (!keys._menuUp) { menuSelection = (menuSelection + 1) % 2; keys._menuUp = true; SFX.menuSelect(); }
-    } else { keys._menuUp = false; }
-    
-    if (keys['ArrowDown'] || keys['KeyS']) {
-      if (!keys._menuDown) { menuSelection = (menuSelection + 1) % 2; keys._menuDown = true; SFX.menuSelect(); }
-    } else { keys._menuDown = false; }
-    
-    if (keys['Enter'] || keys['Space']) {
-      if (!keys._menuSelect) {
-        startGame(menuSelection === 0 ? 1 : 2);
-        keys._menuSelect = true;
-        SFX.menuConfirm();
-      }
-    } else { keys._menuSelect = false; }
+    if (menuScreen === 'sport') {
+      // Sport selection navigation
+      if (keys['ArrowUp'] || keys['KeyW']) {
+        if (!keys._menuUp) { sportSelection = (sportSelection + 2) % 3; keys._menuUp = true; SFX.menuSelect(); }
+      } else { keys._menuUp = false; }
+      
+      if (keys['ArrowDown'] || keys['KeyS']) {
+        if (!keys._menuDown) { sportSelection = (sportSelection + 1) % 3; keys._menuDown = true; SFX.menuSelect(); }
+      } else { keys._menuDown = false; }
+      
+      if (keys['Enter'] || keys['Space']) {
+        if (!keys._menuSelect) {
+          sportMode = ['basketball', 'soccer', 'volleyball'][sportSelection];
+          menuScreen = 'mode';
+          menuSelection = 0;
+          keys._menuSelect = true;
+          SFX.menuConfirm();
+        }
+      } else { keys._menuSelect = false; }
+    } else {
+      // Mode selection navigation (3 options: 1P, 2P, Back)
+      if (keys['ArrowUp'] || keys['KeyW']) {
+        if (!keys._menuUp) { menuSelection = (menuSelection + 2) % 3; keys._menuUp = true; SFX.menuSelect(); }
+      } else { keys._menuUp = false; }
+      
+      if (keys['ArrowDown'] || keys['KeyS']) {
+        if (!keys._menuDown) { menuSelection = (menuSelection + 1) % 3; keys._menuDown = true; SFX.menuSelect(); }
+      } else { keys._menuDown = false; }
+      
+      if (keys['Escape']) {
+        if (!keys._menuBack) { menuScreen = 'sport'; sportSelection = 0; keys._menuBack = true; SFX.menuSelect(); }
+      } else { keys._menuBack = false; }
+      
+      if (keys['Enter'] || keys['Space']) {
+        if (!keys._menuSelect) {
+          if (menuSelection === 2) {
+            menuScreen = 'sport'; sportSelection = 0; SFX.menuSelect();
+          } else {
+            startGame(menuSelection === 0 ? 1 : 2);
+            SFX.menuConfirm();
+          }
+          keys._menuSelect = true;
+        }
+      } else { keys._menuSelect = false; }
+    }
     
     return;
   }
@@ -1524,6 +2149,7 @@ function update() {
     
     if (keys['Escape']) {
       gameState = 'menu';
+      menuScreen = 'sport';
       shakeX = 0; shakeY = 0; shakeTimer = 0;
     }
     return;
@@ -1534,6 +2160,7 @@ function update() {
     if (scoreTimer <= 0) {
       if (scores[0] >= WINNING_SCORE || scores[1] >= WINNING_SCORE) {
         gameState = 'gameover';
+        shakeX = 0; shakeY = 0; shakeTimer = 0;
         SFX.win();
       } else {
         randomizeRound();
@@ -1609,13 +2236,21 @@ function update() {
     shakeMaxTimer = 18; // Store initial value for inverse-square falloff
     
     // Score particles
-    const hoop = hoops[scorer === 0 ? 1 : 0]; // The hoop they scored in
-    spawnParticles(hoop.x, hoop.y, 30, scorer === 0 ? '#e74c3c' : '#3498db', 5);
+    if (sportMode === 'volleyball') {
+      // Particles at ball position
+      spawnParticles(ball.x, ball.y, 30, scorer === 0 ? '#e74c3c' : '#3498db', 5);
+      if (pts === 2) {
+        spawnParticles(ball.x, ball.y, 20, 'rainbow', 6);
+      }
+    } else {
+      const hoop = hoops[scorer === 0 ? 1 : 0]; // The hoop they scored in
+      spawnParticles(hoop.x, hoop.y, 30, scorer === 0 ? '#e74c3c' : '#3498db', 5);
+      if (pts === 2) {
+        spawnParticles(hoop.x, hoop.y, 20, 'rainbow', 6);
+      }
+    }
     SFX.hoopEntry();
     SFX.score();
-    if (pts === 2) {
-      spawnParticles(hoop.x, hoop.y, 20, 'rainbow', 6);
-    }
   }
   
   // Screen shake decay - inverse square law falloff
@@ -1661,6 +2296,9 @@ function draw() {
   // Draw hoops (behind players)
   hoops.forEach(drawHoop);
   
+  // Draw volleyball net
+  if (sportMode === 'volleyball') drawVolleyNet();
+  
   // Draw players sorted by y position
   const sorted = [...players].sort((a, b) => a.y - b.y);
   sorted.forEach(drawPlayer);
@@ -1684,7 +2322,8 @@ function draw() {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 16px monospace';
     ctx.fillText('Court: ' + court.name + '  |  Ball: ' + ballType.name, W/2, H/2 - 60);
-    ctx.fillText('Hoop: ' + hoopShape.name, W/2, H/2 - 35);
+    const shapeLabel = sportMode === 'volleyball' ? 'Net: ' + (netShape ? netShape.name : 'Standard') : (sportMode === 'soccer' ? 'Goal: ' + (goalShape ? goalShape.name : 'Standard') : 'Hoop: ' + (hoopShape ? hoopShape.name : 'Standard'));
+    ctx.fillText(shapeLabel, W/2, H/2 - 35);
     
     const countNum = Math.ceil(roundStartTimer / 30);
     ctx.fillStyle = '#f39c12';
@@ -1700,7 +2339,8 @@ function draw() {
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 18px monospace';
-    ctx.fillText(court.name + '  •  ' + ballType.name + ' Ball  •  ' + hoopShape.name + ' Hoop', W/2, 70);
+    const shapeName = sportMode === 'volleyball' ? (netShape ? netShape.name : 'Standard') + ' Net' : (sportMode === 'soccer' ? (goalShape ? goalShape.name : 'Standard') + ' Goal' : (hoopShape ? hoopShape.name : 'Standard') + ' Hoop');
+    ctx.fillText(court.name + '  •  ' + ballType.name + ' Ball  •  ' + shapeName, W/2, 70);
     if (ballType.points === 2) {
       ctx.fillStyle = rainbowColor(gameTime);
       ctx.fillText('★ RAINBOW 2x POINTS ★', W/2, 95);
@@ -1739,6 +2379,7 @@ function draw() {
     
     if (hbHover && mouse.clicked) {
       gameState = 'menu';
+      menuScreen = 'sport';
       shakeX = 0; shakeY = 0; shakeTimer = 0;
       mouse.clicked = false;
     }
