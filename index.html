@@ -23,7 +23,7 @@ canvas {
 <canvas id="c"></canvas>
 <script>
 // ============================================================
-// BASKET RANDOM - Pixel Art Basketball Game
+// BASKET UN-RANDOM - Pixel Art Basketball Game
 // ============================================================
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -1311,14 +1311,14 @@ function drawMenu() {
   ctx.fillStyle = '#000';
   ctx.font = 'bold 48px monospace';
   ctx.fillText('BASKET', W/2 + 3, 123);
-  ctx.fillText('RANDOM', W/2 + 3, 173);
+  ctx.fillText('UN-RANDOM', W/2 + 3, 173);
   
   // Title text
   ctx.fillStyle = '#e74c3c';
   ctx.font = 'bold 48px monospace';
   ctx.fillText('BASKET', W/2, 120);
   ctx.fillStyle = '#f39c12';
-  ctx.fillText('RANDOM', W/2, 170);
+  ctx.fillText('UN-RANDOM', W/2, 170);
   
   // Bouncing ball
   const ballY = 75 + Math.abs(Math.sin(gameTime * 0.06)) * 20;
