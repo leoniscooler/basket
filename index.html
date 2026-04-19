@@ -546,26 +546,30 @@ function updatePlayer(p, input, dt) {
     p.isCharging = false;
     p.shootCharge = 0;
     p.stillTimer = 0;
-    if (ball && !ball.holder && input.shoot && p._kickCooldown <= 0) {
-      // Check if ball is near player's feet
-      const footY = p.y;
-      const footX = p.x + p.faceDir * 12;
-      const dFoot = dist(ball.x, ball.y, footX, footY);
-      if (dFoot < ball.radius + 28) {
-        // Kick toward opponent's goal
-        const targetGoal = p.team === 0 ? hoops[1] : hoops[0];
-        const dir = targetGoal.x > p.x ? 1 : -1;
-        const kickPower = 16 + Math.abs(p.vx) * 2;
-        const kickAngle = -20 * Math.PI / 180;
-        ball.vx = Math.cos(kickAngle) * kickPower * dir;
-        ball.vy = Math.sin(kickAngle) * kickPower;
-        ball.grabCooldown = 10;
-        ball.trail = [];
-        p._kickCooldown = 15;
-        p._kickAnim = 12;
-        p._kickDir = dir;
-        spawnParticles(footX, footY, 6, '#27ae60', 3);
-        SFX.shoot();
+    if (input.shoot && p._kickCooldown <= 0) {
+      // Always play kick animation
+      const targetGoal = (p.team === 0 && hoops[1]) ? hoops[1] : (hoops[0] || null);
+      const dir = targetGoal ? (targetGoal.x > p.x ? 1 : -1) : p.faceDir;
+      p._kickCooldown = 20;
+      p._kickAnim = 18;
+      p._kickDir = dir;
+      // Check if ball is near player (full body range) to actually kick it
+      if (ball && !ball.holder) {
+        const bodyX = p.x;
+        const bodyTopY = p.y - p.bodyType.legLen - p.bodyType.bodyH;
+        const bodyCY = (bodyTopY + p.y) / 2;
+        const dBall = dist(ball.x, ball.y, bodyX, bodyCY);
+        if (dBall < ball.radius + 40) {
+          // Kick toward opponent's goal
+          const kickPower = 16 + Math.abs(p.vx) * 2;
+          const kickAngle = -20 * Math.PI / 180;
+          ball.vx = Math.cos(kickAngle) * kickPower * dir;
+          ball.vy = Math.sin(kickAngle) * kickPower;
+          ball.grabCooldown = 10;
+          ball.trail = [];
+          spawnParticles(ball.x, ball.y, 6, '#27ae60', 3);
+          SFX.shoot();
+        }
       }
     }
     if (p._kickCooldown > 0) p._kickCooldown--;
@@ -819,36 +823,110 @@ function drawPlayer(p) {
   ctx.lineCap = 'round';
   
   if (p._kickAnim > 0 && (sportMode === 'soccer' || sportMode === 'volleyball')) {
-    // Kick animation: one leg sweeps forward while other stays planted
-    const kickProgress = 1 - (p._kickAnim / 12); // 0 to 1
+    // Realistic kick animation with 4 phases:
+    // Phase 1 (0-0.2): Plant foot steps forward, body leans back, kicking leg winds up behind
+    // Phase 2 (0.2-0.45): Knee drives forward (chambered), thigh leads
+    // Phase 3 (0.45-0.7): Lower leg snaps forward (the strike), foot extends
+    // Phase 4 (0.7-1.0): Follow-through, leg rises, body recenters
+    const kickProgress = 1 - (p._kickAnim / 18); // 0 to 1
     const kDir = p._kickDir;
-    // Swing angle: winds back (negative) then sweeps forward (positive)
-    const swingAngle = kickProgress < 0.3 
-      ? -0.8 * (1 - kickProgress / 0.3) // wind-up
-      : 1.2 * Math.sin((kickProgress - 0.3) / 0.7 * Math.PI); // forward swing
     
-    // Kicking leg
-    const kickFootX = baseX + kDir * (10 + swingAngle * 22) + leanOff * 0.3;
-    const kickFootY = baseY - Math.abs(swingAngle) * 18 - 2;
-    const kickKneeX = baseX + kDir * (5 + swingAngle * 10) + leanOff * 0.3;
-    const kickKneeY = hipY + bt.legLen * 0.35 - Math.abs(swingAngle) * 6;
+    // Body lean: lean back during wind-up, forward during strike
+    let bodyLean = 0;
+    if (kickProgress < 0.2) {
+      bodyLean = -0.12 * (kickProgress / 0.2); // lean back
+    } else if (kickProgress < 0.45) {
+      bodyLean = -0.12 + 0.2 * ((kickProgress - 0.2) / 0.25); // lean forward
+    } else if (kickProgress < 0.7) {
+      bodyLean = 0.08 + 0.06 * ((kickProgress - 0.45) / 0.25); // more forward
+    } else {
+      bodyLean = 0.14 * (1 - (kickProgress - 0.7) / 0.3); // return
+    }
     
+    // Thigh angle of kicking leg (from hip, 0 = straight down, positive = forward/up)
+    let thighAngle, kneeAngle;
+    if (kickProgress < 0.2) {
+      // Wind-up: thigh goes backward
+      const t = kickProgress / 0.2;
+      thighAngle = -0.5 * t; // swing back (less far so foot stays above ground)
+      kneeAngle = 1.0 + 0.3 * t; // knee bent behind
+    } else if (kickProgress < 0.45) {
+      // Knee drive: thigh swings forward and UP, knee stays bent (chambered)
+      const t = (kickProgress - 0.2) / 0.25;
+      thighAngle = -0.5 + 2.0 * t; // -0.5 to 1.5 (higher swing)
+      kneeAngle = 1.3 - 0.3 * t; // stays bent
+    } else if (kickProgress < 0.7) {
+      // Strike: lower leg snaps straight, thigh continues upward
+      const t = (kickProgress - 0.45) / 0.25;
+      thighAngle = 1.5 + 0.2 * t; // 1.5 to 1.7 (leg goes high)
+      kneeAngle = 1.0 - 0.9 * t; // 1.0 to ~0.1 (nearly straight)
+    } else {
+      // Follow-through: leg stays up then comes down
+      const t = (kickProgress - 0.7) / 0.3;
+      thighAngle = 1.7 - 1.2 * t; // comes back down
+      kneeAngle = 0.1 + 0.5 * t; // bends slightly again
+    }
+    
+    // Compute kicking leg positions using thigh + shin segments
+    const thighLen = bt.legLen * 0.48;
+    const shinLen = bt.legLen * 0.52;
+    const hipX = baseX + kDir * 2 + leanOff * 0.5;
+    const hipKickY = hipY - bodyBob;
+    
+    // Thigh end (knee)
+    let kickKneeX = hipX + kDir * Math.sin(thighAngle) * thighLen;
+    let kickKneeY = hipKickY + Math.cos(thighAngle) * thighLen;
+    // Clamp knee above ground
+    kickKneeY = Math.min(kickKneeY, baseY - 4);
+    
+    // Shin angle relative to thigh
+    const shinAbsAngle = thighAngle - kneeAngle;
+    let kickFootX = kickKneeX + kDir * Math.sin(shinAbsAngle) * shinLen;
+    let kickFootY = kickKneeY + Math.cos(shinAbsAngle) * shinLen;
+    // Clamp foot above ground
+    kickFootY = Math.min(kickFootY, baseY - 2);
+    
+    // Draw kicking leg (thigh then shin, with a knee joint)
     ctx.beginPath();
-    ctx.moveTo(baseX + kDir * 3 + leanOff * 0.5, hipY - bodyBob);
-    ctx.quadraticCurveTo(kickKneeX, kickKneeY, kickFootX, kickFootY);
+    ctx.moveTo(hipX, hipKickY);
+    ctx.lineTo(kickKneeX, kickKneeY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(kickKneeX, kickKneeY);
+    ctx.lineTo(kickFootX, kickFootY);
     ctx.stroke();
     
-    // Shoe for kicking foot
-    drawPixelRect(kickFootX - 4, kickFootY - 2, 8, 5, p.colors.jersey);
+    // Knee joint dot
+    drawPixelCircle(kickKneeX, kickKneeY, 3, p.colors.skin);
     
-    // Planted leg (stays still)
-    const plantSpread = -kDir * 5;
+    // Shoe for kicking foot (angled in kick direction)
+    const shoeW = 10, shoeH = 4;
+    ctx.save();
+    ctx.translate(kickFootX, kickFootY);
+    ctx.rotate(kDir * (thighAngle - kneeAngle * 0.5) * 0.5);
+    ctx.fillStyle = p.colors.jersey;
+    ctx.fillRect(-shoeW * 0.3, -shoeH / 2, shoeW, shoeH);
+    ctx.restore();
+    
+    // Planted (support) leg: slightly bent, foot forward for balance
+    const plantDir = -kDir;
+    const plantHipX = baseX + plantDir * 2 + leanOff * 0.5;
+    // Support leg bends slightly and leans forward during strike
+    let plantBend = 0.15;
+    if (kickProgress > 0.2 && kickProgress < 0.7) {
+      plantBend = 0.25; // deeper bend during power phase
+    }
+    const plantKneeX = plantHipX + kDir * 2;
+    const plantKneeY = hipKickY + bt.legLen * 0.45 + plantBend * 4;
+    const plantFootX = plantHipX + kDir * 5 + bodyLean * kDir * 12;
+    const plantFootY = baseY;
+    
     ctx.beginPath();
-    ctx.moveTo(baseX + plantSpread * 0.5 + leanOff * 0.5, hipY - bodyBob);
-    ctx.quadraticCurveTo(baseX + plantSpread + leanOff * 0.3, hipY + bt.legLen * 0.5, baseX + plantSpread * 1.5 + leanOff * 0.3, baseY);
+    ctx.moveTo(plantHipX, hipKickY);
+    ctx.quadraticCurveTo(plantKneeX, plantKneeY, plantFootX, plantFootY);
     ctx.stroke();
     
-    drawPixelRect(baseX + plantSpread * 1.5 - 4 + leanOff * 0.3, baseY - 3, 8, 5, p.colors.jersey);
+    drawPixelRect(plantFootX - 4, plantFootY - 3, 8, 5, p.colors.jersey);
   } else if (isMoving) {
     // Walking animation - legs alternate like real walking
     const stride = Math.min(speed * 2.5, 14);
@@ -2777,6 +2855,13 @@ function randomizeRound() {
     ];
     players[0].y = spawn1y;
     players[1].y = spawn2y;
+  } else if (sportMode === 'volleyball') {
+    players = [
+      createPlayer(W * 0.15, 0, 0, bodyType1),
+      createPlayer(W * 0.35, 0, 1, bodyType1),
+      createPlayer(W * 0.65, 1, 2, bodyType2),
+      createPlayer(W * 0.85, 1, 3, bodyType2),
+    ];
   } else {
     players = [
       createPlayer(W * 0.30, 0, 0, bodyType1),
